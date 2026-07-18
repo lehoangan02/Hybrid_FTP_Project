@@ -50,7 +50,8 @@ os.makedirs(BASE_DIR, exist_ok=True)
 # Format: Sequence (4B) | Ack (4B) | Flags (1B) | Length (2B) | Checksum (4B)
 HEADER_FORMAT = '!I I B H I'
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-
+# Header hiện tại có 15 bytes: 4 (seq) + 4 (ack) + 1 (flags) + 2 (length) + 4 (checksum) = 15 bytes 
+# Hoàn toàn có thể tăng giảm header size lên 20 bytes nếu muốn, nhưng hiện tại 15 bytes là đủ cho các trường cần thiết.
 FLAG_DATA = 0x01
 FLAG_ACK = 0x02
 FLAG_FIN = 0x04
@@ -70,19 +71,19 @@ MAX_CWND = 32          # chặn trên để không làm ngập bên nhận (đó
 def create_packet(seq, ack, flags, data=b""):
     """Đóng gói dữ liệu tầng ứng dụng với Custom UDP Header + Checksum CRC32."""
     length = len(data)
-    temp_header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, 0)
-    checksum = zlib.crc32(temp_header + data) & 0xffffffff
-    header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, checksum)
+    temp_header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, 0) # Đóng gói tạm thời với checksum=0 để tính toán checksum
+    checksum = zlib.crc32(temp_header + data) & 0xffffffff # Ý nghĩa của công thức này là tính toán CRC32 và đảm bảo checksum là một số nguyên 32-bit không âm
+    header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, checksum) 
     return header + data
 
 
 def verify_packet(packet):
     """Tách header/payload và kiểm tra checksum. Trả về (ok, seq, ack, flags, data)."""
-    header = packet[:HEADER_SIZE]
-    data = packet[HEADER_SIZE:]
+    header = packet[:HEADER_SIZE] # Lấy phần header từ gói tin (15 bytes đầu tiên)
+    data = packet[HEADER_SIZE:] # Lấy phần dữ liệu từ gói tin (sau 15 bytes đầu tiên)
     seq, ack, flags, length, recv_checksum = struct.unpack(HEADER_FORMAT, header)
-    temp_header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, 0)
-    calc_checksum = zlib.crc32(temp_header + data) & 0xffffffff
+    temp_header = struct.pack(HEADER_FORMAT, seq, ack, flags, length, 0) 
+    calc_checksum = zlib.crc32(temp_header + data) & 0xffffffff 
     return calc_checksum == recv_checksum, seq, ack, flags, data
 
 
@@ -94,7 +95,7 @@ def rdt_send(udp_socket, remote_addr, filepath, tag="[UDP SEND]"):
     with open(filepath, 'rb') as f:
         packets_data = []
         while True:
-            chunk = f.read(CHUNK_SIZE)
+            chunk = f.read(CHUNK_SIZE) # Đọc từng chunk dữ liệu từ file với kích thước CHUNK_SIZE (1024 bytes)
             if not chunk:
                 break
             packets_data.append(chunk)
@@ -120,7 +121,7 @@ def rdt_send(udp_socket, remote_addr, filepath, tag="[UDP SEND]"):
         # Giai đoạn 2: chờ ACK tối đa TIMEOUT giây (non-blocking bằng select)
         ready = select.select([udp_socket], [], [], TIMEOUT)
 
-        if ready[0]:
+        if ready[0]: # có dữ liệu đến từ socket UDP (ACK từ client)
             ack_packet, _ = udp_socket.recvfrom(2048)
             ok, _, recv_ack, recv_flags, _ = verify_packet(ack_packet)
 
@@ -153,22 +154,22 @@ def rdt_recv(udp_socket, save_path, tag="[UDP RECV]"):
     Trả về sha256_hex của dữ liệu đã ghi (dùng để đối chiếu với sender).
     """
     expected_seq = 0
-    hasher = hashlib.sha256()
+    hasher = hashlib.sha256() 
 
     with open(save_path, 'wb') as f:
         while True:
-            packet, addr = udp_socket.recvfrom(2048)
+            packet, addr = udp_socket.recvfrom(2048) #
             ok, seq, ack, flags, data = verify_packet(packet)
 
-            if not ok:
+            if not ok: # Nếu checksum sai -> bỏ qua, gửi lại ACK gần nhất (expected_seq-1)
                 print(f"{tag} Loi checksum! Huy goi seq={seq}")
                 continue
 
-            if flags == FLAG_FIN:
+            if flags == FLAG_FIN: # Nếu nhận gói FIN -> kết thúc truyền file
                 print(f"{tag} Nhan tin hieu FIN, hoan tat truyen file.")
                 break
 
-            if seq == expected_seq:
+            if seq == expected_seq: # Nếu gói đúng thứ tự -> ghi vào file, cập nhật hash, gửi ACK
                 f.write(data)
                 hasher.update(data)
                 ack_packet = create_packet(0, expected_seq, FLAG_ACK)
@@ -180,7 +181,7 @@ def rdt_recv(udp_socket, save_path, tag="[UDP RECV]"):
                     ack_packet = create_packet(0, expected_seq - 1, FLAG_ACK)
                     udp_socket.sendto(ack_packet, addr)
 
-    return hasher.hexdigest()
+    return hasher.hexdigest() # Trả về SHA256 của dữ liệu đã nhận để client/server đối chiếu tính toàn vẹn dữ liệu
 
 
 def file_sha256(path):
@@ -193,6 +194,7 @@ def file_sha256(path):
 
 # ============================================================
 #  TIỆN ÍCH THAO TÁC THƯ MỤC (an toàn, giới hạn trong BASE_DIR)
+# Ghép và chuẩn hóa đường dẫn, kiểm tra xem nó có thoát ra ngoài BASE_DIR hay không (Path Traversal)
 # ============================================================
 def safe_join(cwd_abs, rel_path):
     """Ghép đường dẫn và đảm bảo kết quả không thoát khỏi BASE_DIR."""
