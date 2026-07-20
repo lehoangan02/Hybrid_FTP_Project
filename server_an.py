@@ -329,6 +329,11 @@ def handle_client(client_conn, client_addr):
 
             # ---------------- Data channel setup ----------------
             elif cmd == "PASV":
+                # Example of PASV flow:
+                # Client sends over TCP: "PASV\r\n"
+                # Server creates a new UDP socket on a random port (e.g., 49204).
+                # p1 = 49204 // 256 = 192, p2 = 49204 % 256 = 52.
+                # Server replies over TCP: "227 Entering Passive Mode (127,0,0,1,192,52).\r\n"
                 if udp_socket:
                     udp_socket.close()
                 udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -374,6 +379,9 @@ def handle_client(client_conn, client_addr):
                 client_conn.sendall(b"150 File status okay, opening data connection.\r\n")
 
                 if mode == "PASV":
+                    # Since UDP is connectionless, the server doesn't know the client's UDP port yet.
+                    # It waits for a "PING" message from the client over UDP to capture the address.
+                    # Client sends UDP: b"PING" -> Server receives and learns remote_data_addr.
                     print("[UDP] (PASV) Waiting for client UDP ping...")
                     _, remote_data_addr = udp_socket.recvfrom(1024)
                 else:
@@ -400,6 +408,7 @@ def handle_client(client_conn, client_addr):
                 client_conn.sendall(b"150 File status okay, opening data connection.\r\n")
 
                 if mode == "PASV":
+                    # Same as in RETR, wait for the client's UDP "PING" to learn their address.
                     print("[UDP] (PASV) Waiting for client UDP ping...")
                     _, remote_data_addr = udp_socket.recvfrom(1024)
                 else:

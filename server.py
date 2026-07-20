@@ -90,11 +90,75 @@ try:
                 reply = f"227 Entering Passive Mode ({ip_parts[0]},{ip_parts[1]},{ip_parts[2]},{ip_parts[3]},{p1},{p2}).\r\n"
                 client_conn.sendall(reply.encode('utf-8'))
                 
-                # For right now, we will just close the data socket immediately after creating it.
-                # In the next step, we will use it to actually send file data!
-                data_socket.close()
                 print(f"[*] Prepared Passive UDP Data Channel on port {data_port}")
+            
+            elif command.upper() == "LIST":
+                if not data_socket:
+                    client_conn.sendall(b"425 Use PASV first.\r\n") #
+                    continue
+                
+                # 1. Tell client we are starting
+                client_conn.sendall(b"150 Here comes the directory listing.\r\n")
+                
+                # 2. Wait for the client's UDP "knock" so we know where to send the data
+                print("[*] Waiting for client UDP knock...")
+                _, client_udp_addr = data_socket.recvfrom(1024)
+                
+                # 3. Get the files in the directory
+                files = os.listdir(current_dir)
+                file_list_str = "\n".join(files) + "\n"
+                if not files:
+                    file_list_str = "(Empty Directory)\n"
+                
+                # 4. Send the file list over the UDP DATA CHANNEL
+                data_socket.sendto(file_list_str.encode('utf-8'), client_udp_addr)
+                
+                # 5. Clean up and report success
+                data_socket.close()
+                data_socket = None
+                client_conn.sendall(b"226 Directory send OK.\r\n")
 
+            elif command.upper().startswith("RETR"):
+                parts = command.split(" ", 1)
+                if len(parts) < 2:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+                    continue
+                
+                filename = parts[1]
+                filepath = os.path.join(current_dir, filename)
+                
+                # Check if the file actually exists
+                if not os.path.isfile(filepath):
+                    client_conn.sendall(b"550 File not found.\r\n")
+                    continue
+                    
+                if not data_socket:
+                    client_conn.sendall(b"425 Use PASV first.\r\n")
+                    continue
+                
+                # 1. Tell client we are starting
+                client_conn.sendall(b"150 Opening data connection for file transfer.\r\n")
+                
+                # 2. Wait for the client's UDP knock
+                print(f"[*] Waiting for client knock to send {filename}...")
+                _, client_udp_addr = data_socket.recvfrom(1024)
+                
+                # 3. Open the file in "rb" (read binary) mode and send it in chunks
+                with open(filepath, "rb") as f:
+                    while True:
+                        bytes_read = f.read(4096)
+                        if not bytes_read:
+                            break # We reached the end of the file
+                        data_socket.sendto(bytes_read, client_udp_addr)
+                
+                # 4. Send our custom End Of File marker so the client knows we're done
+                data_socket.sendto(b"__EOF__", client_udp_addr)
+                
+                # 5. Clean up
+                data_socket.close()
+                data_socket = None
+                client_conn.sendall(b"226 Transfer complete.\r\n")
+            
             elif command.upper() == "QUIT":
                 # Gracefully close session 
                 client_conn.sendall(b"221 Goodbye.\r\n")
