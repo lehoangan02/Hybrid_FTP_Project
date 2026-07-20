@@ -67,12 +67,15 @@ try:
                     client_conn.sendall(b"501 Syntax error in parameters.\r\n") # [cite: 396]
             
             elif command.upper() == "PASV":
+                # Example of PASV flow:
+                # Client sends over TCP: "PASV\r\n"
+                
                 # 1. Create a UDP socket for the Data Channel
                 # Note: AF_INET (IPv4), SOCK_DGRAM (UDP)
                 data_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 
                 # 2. Bind to the host, but use port 0. 
-                # Port 0 tells the OS: "Pick any random available port for me."
+                # Port 0 tells the OS: "Pick any random available port for me." (e.g., 49204)
                 data_socket.bind((HOST, 0))
                 
                 # 3. Find out which port the OS actually gave us
@@ -83,10 +86,12 @@ try:
                 ip_parts = HOST.split('.') 
                 
                 # Calculate the port numbers (FTP quirk: Port = p1 * 256 + p2)
+                # E.g., if data_port is 49204: p1 = 192, p2 = 52.
                 p1 = data_port // 256
                 p2 = data_port % 256
                 
                 # 5. Send the formatted 227 response
+                # Example: "227 Entering Passive Mode (127,0,0,1,192,52).\r\n"
                 reply = f"227 Entering Passive Mode ({ip_parts[0]},{ip_parts[1]},{ip_parts[2]},{ip_parts[3]},{p1},{p2}).\r\n"
                 client_conn.sendall(reply.encode('utf-8'))
                 
