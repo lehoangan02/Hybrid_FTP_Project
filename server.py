@@ -134,7 +134,6 @@ try:
                 filename = parts[1]
                 filepath = os.path.join(current_dir, filename)
                 
-                # Check if the file actually exists
                 if not os.path.isfile(filepath):
                     client_conn.sendall(b"550 File not found.\r\n")
                     continue
@@ -143,25 +142,14 @@ try:
                     client_conn.sendall(b"425 Use PASV first.\r\n")
                     continue
                 
-                # 1. Tell client we are starting
                 client_conn.sendall(b"150 Opening data connection for file transfer.\r\n")
                 
-                # 2. Wait for the client's UDP knock
                 print(f"[*] Waiting for client knock to send {filename}...")
                 _, client_udp_addr = data_socket.recvfrom(1024)
                 
-                # 3. Open the file in "rb" (read binary) mode and send it in chunks
-                with open(filepath, "rb") as f:
-                    while True:
-                        bytes_read = f.read(4096)
-                        if not bytes_read:
-                            break # We reached the end of the file
-                        data_socket.sendto(bytes_read, client_udp_addr)
+                # --- NEW: Use Custom RDT to send the file ---
+                rdt.gbn_send_file(filepath, data_socket, client_udp_addr)
                 
-                # 4. Send our custom End Of File marker so the client knows we're done
-                data_socket.sendto(b"__EOF__", client_udp_addr)
-                
-                # 5. Clean up
                 data_socket.close()
                 data_socket = None
                 client_conn.sendall(b"226 Transfer complete.\r\n")
@@ -179,23 +167,12 @@ try:
                     client_conn.sendall(b"425 Use PASV first.\r\n")
                     continue
                 
-                # 1. Tell client we are ready to receive
                 client_conn.sendall(b"150 Ready to receive file.\r\n")
                 print(f"[*] Receiving {filename} from client...")
                 
-                # 2. Open a new file in "wb" (write binary) mode
-                with open(filepath, "wb") as f:
-                    while True:
-                        # 3. Catch the incoming UDP packets
-                        udp_data, _ = data_socket.recvfrom(4096)
-                        
-                        # 4. Stop if we see the End Of File marker
-                        if udp_data == b"__EOF__":
-                            break
-                            
-                        f.write(udp_data)
+                # --- NEW: Use Custom RDT to receive the file ---
+                rdt.gbn_receive_file(filepath, data_socket)
                 
-                # 5. Clean up
                 data_socket.close()
                 data_socket = None
                 client_conn.sendall(b"226 Transfer complete.\r\n")

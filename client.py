@@ -60,37 +60,24 @@ while True:
             print(client_socket.recv(1024).decode('utf-8').strip())
             continue
             
-        # 1. Read the server's response (It might be 150 OK, or 550 File Not Found)
         reply = client_socket.recv(1024).decode('utf-8').strip()
         print(reply)
         
-        # If it's an error, abort the download process
         if not reply.startswith("150"):
             continue
             
         filename = user_input.split(" ", 1)[1]
         
-        # 2. Create UDP socket and send the knock
         client_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         client_udp.sendto(b"KNOCK", (data_server_ip, data_server_port))
         
         print(f"\n[*] Downloading {filename}...")
         
-        # 3. Open a new file in "wb" (write binary) mode to save the data
-        # We add "downloaded_" to the name so we don't overwrite the original if testing locally
-        with open("downloaded_" + filename, "wb") as f:
-            while True:
-                udp_data, _ = client_udp.recvfrom(4096)
-                
-                # 4. Check for our custom End Of File marker
-                if udp_data == b"__EOF__":
-                    break
-                    
-                f.write(udp_data)
+        # --- NEW: Use Custom RDT to receive the file ---
+        rdt.gbn_receive_file("downloaded_" + filename, client_udp)
                 
         print(f"[*] Successfully saved as downloaded_{filename}\n")
         
-        # 5. Clean up and read the final 226 completion message
         client_udp.close()
         data_server_port = None
         print(client_socket.recv(1024).decode('utf-8').strip())
@@ -102,7 +89,6 @@ while True:
             print(client_socket.recv(1024).decode('utf-8').strip())
             continue
             
-        # 1. Read the 150 OK from the server
         reply = client_socket.recv(1024).decode('utf-8').strip()
         print(reply)
         
@@ -111,29 +97,20 @@ while True:
             
         filename = user_input.split(" ", 1)[1]
         
-        # 2. Prepare the UDP socket
         client_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         print(f"\n[*] Uploading {filename}...")
         
         try:
-            # 3. Open the local file and send it in chunks
-            with open(filename, "rb") as f:
-                while True:
-                    bytes_read = f.read(4096)
-                    if not bytes_read:
-                        break
-                    client_udp.sendto(bytes_read, (data_server_ip, data_server_port))
-                    
-            # 4. Send the custom EOF marker so the server knows we are done
-            client_udp.sendto(b"__EOF__", (data_server_ip, data_server_port))
+            # --- NEW: Use Custom RDT to send the file ---
+            rdt.gbn_send_file(filename, client_udp, (data_server_ip, data_server_port))
             print(f"[*] Upload complete!\n")
             
         except FileNotFoundError:
             print(f"Error: The file '{filename}' does not exist on your computer.")
-            # Send EOF anyway so the server doesn't freeze waiting for data!
-            client_udp.sendto(b"__EOF__", (data_server_ip, data_server_port))
+            # Send FIN anyway to prevent server from freezing
+            fin_pkt = rdt.make_packet(0, 0, rdt.FLAG_FIN)
+            client_udp.sendto(fin_pkt, (data_server_ip, data_server_port))
             
-        # 5. Clean up and read the final 226 completion message
         client_udp.close()
         data_server_port = None
         print(client_socket.recv(1024).decode('utf-8').strip())
