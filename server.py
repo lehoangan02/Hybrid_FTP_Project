@@ -1,5 +1,7 @@
 import socket
 import os
+import rdt
+import hashlib
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -163,7 +165,81 @@ try:
                 data_socket.close()
                 data_socket = None
                 client_conn.sendall(b"226 Transfer complete.\r\n")
+
+            elif command.upper().startswith("STOR"):
+                parts = command.split(" ", 1)
+                if len(parts) < 2:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+                    continue
+                
+                filename = parts[1]
+                filepath = os.path.join(current_dir, "uploaded_" + filename)
+                
+                if not data_socket:
+                    client_conn.sendall(b"425 Use PASV first.\r\n")
+                    continue
+                
+                # 1. Tell client we are ready to receive
+                client_conn.sendall(b"150 Ready to receive file.\r\n")
+                print(f"[*] Receiving {filename} from client...")
+                
+                # 2. Open a new file in "wb" (write binary) mode
+                with open(filepath, "wb") as f:
+                    while True:
+                        # 3. Catch the incoming UDP packets
+                        udp_data, _ = data_socket.recvfrom(4096)
+                        
+                        # 4. Stop if we see the End Of File marker
+                        if udp_data == b"__EOF__":
+                            break
+                            
+                        f.write(udp_data)
+                
+                # 5. Clean up
+                data_socket.close()
+                data_socket = None
+                client_conn.sendall(b"226 Transfer complete.\r\n")
             
+            elif command.upper().startswith("MKD"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target = os.path.join(current_dir, parts[1])
+                    try:
+                        os.mkdir(target) # Ask OS to create the folder
+                        # 257 is the standard success code for creating a folder
+                        client_conn.sendall(f"257 \"{parts[1]}\" directory created.\r\n".encode('utf-8'))
+                    except FileExistsError:
+                        client_conn.sendall(b"550 Directory already exists.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper().startswith("RMD"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target = os.path.join(current_dir, parts[1])
+                    try:
+                        os.rmdir(target) # Ask OS to remove the folder
+                        client_conn.sendall(b"250 Directory removed.\r\n")
+                    except FileNotFoundError:
+                        client_conn.sendall(b"550 Directory not found.\r\n")
+                    except OSError:
+                        # os.rmdir will throw an OSError if the folder isn't empty!
+                        client_conn.sendall(b"550 Directory not empty or cannot be removed.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper().startswith("DELE"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target = os.path.join(current_dir, parts[1])
+                    try:
+                        os.remove(target) # Ask OS to delete the file
+                        client_conn.sendall(b"250 File deleted.\r\n")
+                    except FileNotFoundError:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
             elif command.upper() == "QUIT":
                 # Gracefully close session 
                 client_conn.sendall(b"221 Goodbye.\r\n")

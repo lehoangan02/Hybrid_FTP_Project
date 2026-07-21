@@ -1,4 +1,5 @@
 import socket
+import rdt
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -89,6 +90,49 @@ while True:
                 
         print(f"[*] Successfully saved as downloaded_{filename}\n")
         
+        # 5. Clean up and read the final 226 completion message
+        client_udp.close()
+        data_server_port = None
+        print(client_socket.recv(1024).decode('utf-8').strip())
+        continue
+
+    elif user_input.upper().startswith("STOR"):
+        if not data_server_port:
+            print("Error: You must send PASV before STOR.")
+            print(client_socket.recv(1024).decode('utf-8').strip())
+            continue
+            
+        # 1. Read the 150 OK from the server
+        reply = client_socket.recv(1024).decode('utf-8').strip()
+        print(reply)
+        
+        if not reply.startswith("150"):
+            continue
+            
+        filename = user_input.split(" ", 1)[1]
+        
+        # 2. Prepare the UDP socket
+        client_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        print(f"\n[*] Uploading {filename}...")
+        
+        try:
+            # 3. Open the local file and send it in chunks
+            with open(filename, "rb") as f:
+                while True:
+                    bytes_read = f.read(4096)
+                    if not bytes_read:
+                        break
+                    client_udp.sendto(bytes_read, (data_server_ip, data_server_port))
+                    
+            # 4. Send the custom EOF marker so the server knows we are done
+            client_udp.sendto(b"__EOF__", (data_server_ip, data_server_port))
+            print(f"[*] Upload complete!\n")
+            
+        except FileNotFoundError:
+            print(f"Error: The file '{filename}' does not exist on your computer.")
+            # Send EOF anyway so the server doesn't freeze waiting for data!
+            client_udp.sendto(b"__EOF__", (data_server_ip, data_server_port))
+            
         # 5. Clean up and read the final 226 completion message
         client_udp.close()
         data_server_port = None
