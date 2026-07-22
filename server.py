@@ -3,6 +3,7 @@ import os
 import rdt
 import hashlib
 import threading
+import time
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -239,6 +240,60 @@ def handle_client(client_conn, client_addr):
                         client_conn.sendall(b"550 File not found.\r\n")
                 else:
                     client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper() == "CDUP":
+                potential_dir = os.path.abspath(os.path.join(current_dir, ".."))
+                if os.path.isdir(potential_dir):
+                    current_dir = potential_dir
+                    client_conn.sendall(b"250 Directory changed to parent.\r\n")
+                else:
+                    client_conn.sendall(b"550 Cannot change to parent directory.\r\n")
+
+            elif command.upper().startswith("SIZE"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target_file = os.path.join(current_dir, parts[1])
+                    if os.path.isfile(target_file):
+                        size = os.path.getsize(target_file)
+                        client_conn.sendall(f"213 {size}\r\n".encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper().startswith("MDTM"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target_file = os.path.join(current_dir, parts[1])
+                    if os.path.isfile(target_file):
+                        mtime = os.path.getmtime(target_file)
+                        time_str = time.strftime('%Y%m%d%H%M%S', time.localtime(mtime))
+                        client_conn.sendall(f"213 {time_str}\r\n".encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper() == "NOOP":
+                client_conn.sendall(b"200 NOOP OK.\r\n")
+                
+            elif command.upper().startswith("TYPE"):
+                parts = command.split(" ", 1)
+                type_val = parts[1] if len(parts) > 1 else "I"
+                client_conn.sendall(f"200 Type set to {type_val}.\r\n".encode('utf-8'))
+                
+            elif command.upper().startswith("MODE"):
+                parts = command.split(" ", 1)
+                mode_val = parts[1] if len(parts) > 1 else "S"
+                client_conn.sendall(f"200 Mode set to {mode_val}.\r\n".encode('utf-8'))
+                
+            elif command.upper().startswith("HELP"):
+                help_msg = (
+                    "214-The following commands are recognized:\r\n"
+                    " USER PASS PWD CWD CDUP LIST PASV PORT RETR STOR MKD RMD DELE SIZE MDTM HASH NOOP TYPE MODE HELP QUIT\r\n"
+                    "214 Help OK.\r\n"
+                )
+                client_conn.sendall(help_msg.encode('utf-8'))
 
             elif command.upper() == "QUIT":
                 client_conn.sendall(b"221 Goodbye.\r\n")
