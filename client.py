@@ -1,5 +1,6 @@
 import socket
 import rdt
+import hashlib
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -79,8 +80,38 @@ while True:
         print(f"[*] Successfully saved as downloaded_{filename}\n")
         
         client_udp.close()
+
+        transfer_complete_msg = client_socket.recv(1024).decode('utf-8').strip()
+        print(transfer_complete_msg)
+
+        print("[*] Requesting server hash for integrity check...")
+        client_socket.sendall((f"HASH {filename}\r\n").encode('utf-8'))
+        hash_reply = client_socket.recv(1024).decode('utf-8').strip()
+        
+        if hash_reply.startswith("213"):
+            server_hash = hash_reply.split(" ")[1]
+            
+            # Calculate local hash of the downloaded file
+            hasher = hashlib.sha256()
+            with open("downloaded_" + filename, "rb") as f:
+                while True:
+                    chunk = f.read(4096)
+                    if not chunk:
+                        break
+                    hasher.update(chunk)
+            local_hash = hasher.hexdigest()
+            
+            print(f"Server SHA-256: {server_hash}")
+            print(f"Local  SHA-256: {local_hash}")
+            
+            if server_hash == local_hash:
+                print("[+] VERIFIED: File transferred perfectly without corruption!")
+            else:
+                print("[-] WARNING: File hashes do not match. Corruption detected!")
+        else:
+            print(f"[-] Could not verify hash: {hash_reply}")
+
         data_server_port = None
-        print(client_socket.recv(1024).decode('utf-8').strip())
         continue
 
     elif user_input.upper().startswith("STOR"):

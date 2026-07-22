@@ -217,6 +217,29 @@ try:
                 else:
                     client_conn.sendall(b"501 Syntax error in parameters.\r\n")
 
+            elif command.upper().startswith("HASH"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target_file = os.path.join(current_dir, parts[1])
+                    
+                    if os.path.isfile(target_file):
+                        # Calculate the SHA-256 hash of the file
+                        hasher = hashlib.sha256()
+                        with open(target_file, "rb") as f:
+                            while True:
+                                chunk = f.read(4096)
+                                if not chunk:
+                                    break
+                                hasher.update(chunk)
+                                
+                        file_hash = hasher.hexdigest()
+                        # 213 is the standard FTP code for file status
+                        client_conn.sendall(f"213 {file_hash}\r\n".encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
             elif command.upper() == "QUIT":
                 # Gracefully close session 
                 client_conn.sendall(b"221 Goodbye.\r\n")
