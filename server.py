@@ -8,16 +8,27 @@ import time
 HOST = '127.0.0.1'
 PORT = 2121
 
+def get_safe_path(base_dir, current_dir, target_path):
+    """Safely resolve target_path ensuring it doesn't escape base_dir."""
+    target_path = target_path.lstrip('/\\')
+    resolved_path = os.path.abspath(os.path.join(current_dir, target_path))
+    if resolved_path.startswith(os.path.abspath(base_dir)):
+        return resolved_path
+    return None
+
 def handle_client(client_conn, client_addr):
     """Handles an isolated session for a single connected client."""
     print(f"\n[*] New client connected from {client_addr}")
     
     # Thread-local state: Each client tracks its own directory and data channel
     current_dir = os.getcwd()
+    base_dir = current_dir
     data_socket = None
 
     is_pasv = False
     client_data_addr = None
+    username = None
+    is_authenticated = False
     
     try:
         # Send standard FTP welcome code
@@ -32,11 +43,30 @@ def handle_client(client_conn, client_addr):
             # Adding the port to the print statement to identify which client is talking
             print(f"[Client {client_addr[1]} says]: {command}")
             
-            if command.upper().startswith("USER"):
-                client_conn.sendall(b"331 Username OK, need password.\r\n")
+            command_type = command.split(" ", 1)[0].upper()
+            if command_type not in ["USER", "PASS", "QUIT", "HELP"] and not is_authenticated:
+                client_conn.sendall(b"530 Not logged in.\r\n")
+                continue
+
+            if command_type == "USER":
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    username = parts[1]
+                    client_conn.sendall(b"331 Username OK, need password.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
                 
-            elif command.upper().startswith("PASS"):
-                client_conn.sendall(b"230 User logged in successfully.\r\n")
+            elif command_type == "PASS":
+                parts = command.split(" ", 1)
+                if len(parts) > 1 and username:
+                    password = parts[1]
+                    if username == "admin" and password == "password123":
+                        is_authenticated = True
+                        client_conn.sendall(b"230 User logged in successfully.\r\n")
+                    else:
+                        client_conn.sendall(b"530 Authentication failed.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error or USER command missing.\r\n")
             
             elif command.upper() == "PWD":
                 reply = f"257 \"{current_dir}\" is current directory.\r\n"
@@ -48,9 +78,9 @@ def handle_client(client_conn, client_addr):
                 if len(parts) > 1:
                     target_dir = parts[1]
                     # FIX: Safely calculate new path without changing global server OS state
-                    potential_dir = os.path.abspath(os.path.join(current_dir, target_dir))
+                    potential_dir = get_safe_path(base_dir, current_dir, target_dir)
                     
-                    if os.path.isdir(potential_dir):
+                    if potential_dir and os.path.isdir(potential_dir):
                         current_dir = potential_dir 
                         client_conn.sendall(b"250 Requested file action OK.\r\n")
                     else:
@@ -68,6 +98,7 @@ def handle_client(client_conn, client_addr):
                 p1 = data_port // 256
                 p2 = data_port % 256
                 
+                is_pasv = True
                 reply = f"227 Entering Passive Mode ({ip_parts[0]},{ip_parts[1]},{ip_parts[2]},{ip_parts[3]},{p1},{p2}).\r\n"
                 client_conn.sendall(reply.encode('utf-8'))
                 print(f"[*] Prepared Passive UDP Data Channel on port {data_port}")
@@ -121,9 +152,9 @@ def handle_client(client_conn, client_addr):
                     continue
                 
                 filename = parts[1]
-                filepath = os.path.join(current_dir, filename)
+                filepath = get_safe_path(base_dir, current_dir, filename)
                 
-                if not os.path.isfile(filepath):
+                if not filepath or not os.path.isfile(filepath):
                     client_conn.sendall(b"550 File not found.\r\n")
                     continue
                     
@@ -158,7 +189,10 @@ def handle_client(client_conn, client_addr):
                     continue
                 
                 filename = parts[1]
-                filepath = os.path.join(current_dir, "uploaded_" + filename)
+                filepath = get_safe_path(base_dir, current_dir, "uploaded_" + filename)
+                if not filepath:
+                    client_conn.sendall(b"550 Access denied.\r\n")
+                    continue
                 
                 if not is_pasv and not client_data_addr:
                     client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
@@ -185,7 +219,10 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("MKD"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target = os.path.join(current_dir, parts[1])
+                    target = get_safe_path(base_dir, current_dir, parts[1])
+                    if not target:
+                        client_conn.sendall(b"550 Access denied.\r\n")
+                        continue
                     try:
                         os.mkdir(target)
                         client_conn.sendall(f"257 \"{parts[1]}\" directory created.\r\n".encode('utf-8'))
@@ -197,7 +234,10 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("RMD"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target = os.path.join(current_dir, parts[1])
+                    target = get_safe_path(base_dir, current_dir, parts[1])
+                    if not target:
+                        client_conn.sendall(b"550 Access denied.\r\n")
+                        continue
                     try:
                         os.rmdir(target)
                         client_conn.sendall(b"250 Directory removed.\r\n")
@@ -211,7 +251,10 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("DELE"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target = os.path.join(current_dir, parts[1])
+                    target = get_safe_path(base_dir, current_dir, parts[1])
+                    if not target:
+                        client_conn.sendall(b"550 Access denied.\r\n")
+                        continue
                     try:
                         os.remove(target)
                         client_conn.sendall(b"250 File deleted.\r\n")
@@ -223,9 +266,9 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("HASH"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target_file = os.path.join(current_dir, parts[1])
+                    target_file = get_safe_path(base_dir, current_dir, parts[1])
                     
-                    if os.path.isfile(target_file):
+                    if target_file and os.path.isfile(target_file):
                         hasher = hashlib.sha256()
                         with open(target_file, "rb") as f:
                             while True:
@@ -242,8 +285,8 @@ def handle_client(client_conn, client_addr):
                     client_conn.sendall(b"501 Syntax error in parameters.\r\n")
 
             elif command.upper() == "CDUP":
-                potential_dir = os.path.abspath(os.path.join(current_dir, ".."))
-                if os.path.isdir(potential_dir):
+                potential_dir = get_safe_path(base_dir, current_dir, "..")
+                if potential_dir and os.path.isdir(potential_dir):
                     current_dir = potential_dir
                     client_conn.sendall(b"250 Directory changed to parent.\r\n")
                 else:
@@ -252,8 +295,8 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("SIZE"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target_file = os.path.join(current_dir, parts[1])
-                    if os.path.isfile(target_file):
+                    target_file = get_safe_path(base_dir, current_dir, parts[1])
+                    if target_file and os.path.isfile(target_file):
                         size = os.path.getsize(target_file)
                         client_conn.sendall(f"213 {size}\r\n".encode('utf-8'))
                     else:
@@ -264,8 +307,8 @@ def handle_client(client_conn, client_addr):
             elif command.upper().startswith("MDTM"):
                 parts = command.split(" ", 1)
                 if len(parts) > 1:
-                    target_file = os.path.join(current_dir, parts[1])
-                    if os.path.isfile(target_file):
+                    target_file = get_safe_path(base_dir, current_dir, parts[1])
+                    if target_file and os.path.isfile(target_file):
                         mtime = os.path.getmtime(target_file)
                         time_str = time.strftime('%Y%m%d%H%M%S', time.localtime(mtime))
                         client_conn.sendall(f"213 {time_str}\r\n".encode('utf-8'))
