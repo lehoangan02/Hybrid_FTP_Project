@@ -51,9 +51,9 @@ while True:
         # Send any other command normally
         client_socket.sendall((user_input + "\r\n").encode('utf-8'))
     
-    if user_input.upper() == "LIST":
+    if user_input.upper().startswith("LIST") or user_input.upper().startswith("NLST"):
         if not data_server_port and not is_active_mode:
-            print("Error: You must send PASV or PORT before LIST.")
+            print(f"Error: You must send PASV or PORT before {user_input.upper().split(' ')[0]}.")
             print(client_socket.recv(1024).decode('utf-8').strip())
             continue
             
@@ -138,9 +138,9 @@ while True:
 
         continue
 
-    elif user_input.upper().startswith("STOR"):
+    elif user_input.upper().startswith("STOR") or user_input.upper().startswith("STOU"):
         if not data_server_port and not is_active_mode:
-            print("Error: You must send PASV or PORT before STOR.")
+            print(f"Error: You must send PASV or PORT before {user_input.upper().split(' ')[0]}.")
             print(client_socket.recv(1024).decode('utf-8').strip())
             continue
             

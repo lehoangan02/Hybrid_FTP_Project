@@ -4,6 +4,7 @@ import rdt
 import hashlib
 import threading
 import time
+import uuid
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -103,7 +104,7 @@ def handle_client(client_conn, client_addr):
                 client_conn.sendall(reply.encode('utf-8'))
                 print(f"[*] Prepared Passive UDP Data Channel on port {data_port}")
             
-            elif command.upper() == "LIST":
+            elif command.upper().startswith("LIST") or command.upper().startswith("NLST"):
                 if not data_socket and not client_data_addr:
                     client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
                     continue
@@ -215,6 +216,39 @@ def handle_client(client_conn, client_addr):
                     active_socket.close()
                 
                 client_conn.sendall(b"226 Transfer complete.\r\n")
+
+            elif command.upper().startswith("STOU"):
+                if not is_pasv and not client_data_addr:
+                    client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
+                    continue
+                
+                parts = command.split(" ", 1)
+                prefix = "uploaded_"
+                if len(parts) > 1:
+                    prefix += parts[1] + "_"
+                
+                unique_name = prefix + uuid.uuid4().hex[:8]
+                filepath = get_safe_path(base_dir, current_dir, unique_name)
+                
+                if not filepath:
+                    client_conn.sendall(b"550 Access denied.\r\n")
+                    continue
+                
+                client_conn.sendall(f"150 FILE: {unique_name} Ready to receive file.\r\n".encode('utf-8'))
+                print(f"[*] Receiving unique file {unique_name} from client...")
+                
+                if is_pasv:
+                    rdt.gbn_receive_file(filepath, data_socket)
+                    data_socket.close()
+                    data_socket = None
+                else:
+                    active_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    active_socket.bind((HOST, 0))
+                    active_socket.sendto(b"KNOCK", client_data_addr)
+                    rdt.gbn_receive_file(filepath, active_socket)
+                    active_socket.close()
+                
+                client_conn.sendall(b"226 Transfer complete.\r\n")
                 
             elif command.upper().startswith("MKD"):
                 parts = command.split(" ", 1)
@@ -291,6 +325,20 @@ def handle_client(client_conn, client_addr):
                     client_conn.sendall(b"250 Directory changed to parent.\r\n")
                 else:
                     client_conn.sendall(b"550 Cannot change to parent directory.\r\n")
+
+            elif command.upper().startswith("STAT"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target = get_safe_path(base_dir, current_dir, parts[1])
+                    if target and os.path.exists(target):
+                        stats = os.stat(target)
+                        reply = f"213-Status of {parts[1]}:\r\n Size: {stats.st_size} bytes\r\n213 End of status.\r\n"
+                        client_conn.sendall(reply.encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    reply = "211-Server status:\r\n Hybrid FTP Server v1.0\r\n Mode: Active/Passive\r\n211 End of status.\r\n"
+                    client_conn.sendall(reply.encode('utf-8'))
 
             elif command.upper().startswith("SIZE"):
                 parts = command.split(" ", 1)
