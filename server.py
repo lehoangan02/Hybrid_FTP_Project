@@ -30,6 +30,7 @@ def handle_client(client_conn, client_addr):
     client_data_addr = None
     username = None
     is_authenticated = False
+    rename_from_path = None
     
     try:
         # Send standard FTP welcome code
@@ -296,6 +297,45 @@ def handle_client(client_conn, client_addr):
                         client_conn.sendall(b"550 File not found.\r\n")
                 else:
                     client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+
+            elif command.upper().startswith("RNFR"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    target = get_safe_path(base_dir, current_dir, parts[1])
+                    if target and os.path.exists(target):
+                        rename_from_path = target
+                        client_conn.sendall(b"350 Requested file action pending further information.\r\n")
+                    else:
+                        client_conn.sendall(b"550 File not found.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+            
+            elif command.upper().startswith("RNTO"):
+                parts = command.split(" ", 1)
+                if len(parts) > 1:
+                    if rename_from_path:
+                        target = get_safe_path(base_dir, current_dir, parts[1])
+                        if target:
+                            try:
+                                os.rename(rename_from_path, target)
+                                client_conn.sendall(b"250 Requested file action OK, file renamed.\r\n")
+                            except OSError:
+                                client_conn.sendall(b"550 Rename failed.\r\n")
+                        else:
+                            client_conn.sendall(b"550 Access denied for target path.\r\n")
+                        rename_from_path = None
+                    else:
+                        client_conn.sendall(b"503 Bad sequence of commands.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
+                    
+            elif command.upper() == "ABOR":
+                if data_socket:
+                    data_socket.close()
+                    data_socket = None
+                is_pasv = False
+                client_data_addr = None
+                client_conn.sendall(b"226 Abort successful.\r\n")
 
             elif command.upper().startswith("HASH"):
                 parts = command.split(" ", 1)
