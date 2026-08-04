@@ -128,30 +128,30 @@ def gbn_receive_file(filepath, udp_socket, transfer_type="I", transfer_mode="S")
     
     while True:
         packet, addr = udp_socket.recvfrom(4096)
-            parsed_header, is_valid = parse_packet(packet)
+        parsed_header, is_valid = parse_packet(packet)
+        
+        if not is_valid or not parsed_header:
+            continue 
             
-            if not is_valid or not parsed_header:
-                continue 
-                
-            seq_num, _, length, flags, data = parsed_header
+        seq_num, _, length, flags, data = parsed_header
+        
+        if flags == FLAG_FIN:
+            ack_pkt = make_packet(0, seq_num, FLAG_ACK)
+            udp_socket.sendto(ack_pkt, addr)
+            break
             
-            if flags == FLAG_FIN:
-                ack_pkt = make_packet(0, seq_num, FLAG_ACK)
-                udp_socket.sendto(ack_pkt, addr)
-                break
-                
-            if flags == FLAG_DATA and seq_num == expected_seq_num:
-                received_data.extend(data)
-                # Send Cumulative ACK[cite: 2]
-                ack_pkt = make_packet(0, expected_seq_num, FLAG_ACK)
-                udp_socket.sendto(ack_pkt, addr)
-                expected_seq_num += 1
-                
-            elif flags == FLAG_DATA:
-                # Out of order! Re-ACK the last good packet[cite: 2]
-                last_good_ack = max(0, expected_seq_num - 1)
-                ack_pkt = make_packet(0, last_good_ack, FLAG_ACK)
-                udp_socket.sendto(ack_pkt, addr)
+        if flags == FLAG_DATA and seq_num == expected_seq_num:
+            received_data.extend(data)
+            # Send Cumulative ACK[cite: 2]
+            ack_pkt = make_packet(0, expected_seq_num, FLAG_ACK)
+            udp_socket.sendto(ack_pkt, addr)
+            expected_seq_num += 1
+            
+        elif flags == FLAG_DATA:
+            # Out of order! Re-ACK the last good packet[cite: 2]
+            last_good_ack = max(0, expected_seq_num - 1)
+            ack_pkt = make_packet(0, last_good_ack, FLAG_ACK)
+            udp_socket.sendto(ack_pkt, addr)
 
     # Post-process the received data before writing to disk
     final_data = bytes(received_data)
