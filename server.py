@@ -31,6 +31,8 @@ def handle_client(client_conn, client_addr):
     username = None
     is_authenticated = False
     rename_from_path = None
+    transfer_type = "I"
+    transfer_mode = "S"
     
     try:
         # Send standard FTP welcome code
@@ -413,13 +415,27 @@ def handle_client(client_conn, client_addr):
                 
             elif command.upper().startswith("TYPE"):
                 parts = command.split(" ", 1)
-                type_val = parts[1] if len(parts) > 1 else "I"
-                client_conn.sendall(f"200 Type set to {type_val}.\r\n".encode('utf-8'))
+                if len(parts) > 1:
+                    type_val = parts[1].upper()
+                    if type_val in ["A", "I"]:
+                        transfer_type = type_val
+                        client_conn.sendall(f"200 Type set to {type_val}.\r\n".encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"504 Command not implemented for that parameter.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
                 
             elif command.upper().startswith("MODE"):
                 parts = command.split(" ", 1)
-                mode_val = parts[1] if len(parts) > 1 else "S"
-                client_conn.sendall(f"200 Mode set to {mode_val}.\r\n".encode('utf-8'))
+                if len(parts) > 1:
+                    mode_val = parts[1].upper()
+                    if mode_val in ["S", "B", "C"]:
+                        transfer_mode = mode_val
+                        client_conn.sendall(f"200 Mode set to {mode_val}.\r\n".encode('utf-8'))
+                    else:
+                        client_conn.sendall(b"504 Command not implemented for that parameter.\r\n")
+                else:
+                    client_conn.sendall(b"501 Syntax error in parameters.\r\n")
                 
             elif command.upper().startswith("HELP"):
                 help_msg = (

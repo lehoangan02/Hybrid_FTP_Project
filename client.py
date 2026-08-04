@@ -2,7 +2,7 @@ import socket
 import rdt
 import hashlib
 
-HOST = '127.0.0.1'
+HOST = '192.168.1.7'
 PORT = 2121
 
 data_server_ip = None
@@ -197,6 +197,8 @@ while True:
         end = server_reply.find(')')
         numbers = server_reply[start:end].split(',')
         data_server_ip = f"{numbers[0]}.{numbers[1]}.{numbers[2]}.{numbers[3]}"
+        if data_server_ip == '0.0.0.0' or data_server_ip == '127.0.0.1':
+            data_server_ip = HOST
         p1, p2 = int(numbers[4]), int(numbers[5])
         data_server_port = (p1 * 256) + p2
         print(f"[Client Internal] -> UDP Data Channel ready on port {data_server_port}")
