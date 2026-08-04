@@ -11,6 +11,8 @@ data_server_port = None
 # Initialize Active Mode state variables
 is_active_mode = False
 client_active_udp = None
+transfer_type = "I"
+transfer_mode = "S"
 
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 print(f"[*] Connecting to {HOST}:{PORT}...")
@@ -48,6 +50,17 @@ while True:
         print(client_socket.recv(1024).decode('utf-8').strip()) # Read 200 OK
         continue
     else:
+        # Intercept TYPE and MODE to keep local state
+        if user_input.upper().startswith("TYPE"):
+            parts = user_input.split(" ", 1)
+            if len(parts) > 1 and parts[1].upper() in ["A", "I"]:
+                transfer_type = parts[1].upper()
+                
+        if user_input.upper().startswith("MODE"):
+            parts = user_input.split(" ", 1)
+            if len(parts) > 1 and parts[1].upper() in ["S", "B", "C"]:
+                transfer_mode = parts[1].upper()
+                
         # Send any other command normally
         client_socket.sendall((user_input + "\r\n").encode('utf-8'))
     
@@ -95,12 +108,12 @@ while True:
         if is_active_mode:
             # Active Mode: Wait for the server to knock so we know its address!
             _, server_active_addr = client_active_udp.recvfrom(1024)
-            rdt.gbn_receive_file("downloaded_" + filename, client_active_udp)
+            rdt.gbn_receive_file("downloaded_" + filename, client_active_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
         else:
             # Passive Mode: Create socket, knock, and listen
             pasv_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             pasv_udp.sendto(b"KNOCK", (data_server_ip, data_server_port))
-            rdt.gbn_receive_file("downloaded_" + filename, pasv_udp)
+            rdt.gbn_receive_file("downloaded_" + filename, pasv_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
             pasv_udp.close()
             data_server_port = None
                 
@@ -157,11 +170,11 @@ while True:
             if is_active_mode:
                 # Active Mode: Wait for the server to knock, then send to that address
                 _, server_active_addr = client_active_udp.recvfrom(1024)
-                rdt.gbn_send_file(filename, client_active_udp, server_active_addr)
+                rdt.gbn_send_file(filename, client_active_udp, server_active_addr, transfer_type=transfer_type, transfer_mode=transfer_mode)
             else:
                 # Passive Mode
                 pasv_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                rdt.gbn_send_file(filename, pasv_udp, (data_server_ip, data_server_port))
+                rdt.gbn_send_file(filename, pasv_udp, (data_server_ip, data_server_port), transfer_type=transfer_type, transfer_mode=transfer_mode)
                 pasv_udp.close()
                 data_server_port = None
                 

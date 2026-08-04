@@ -40,17 +40,27 @@ def parse_packet(packet):
     is_valid = (pkt_checksum == calculated_checksum)
     return (seq_num, ack_num, length, flags, data), is_valid
 
-def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0):
+def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0, transfer_type="I", transfer_mode="S"):
     """Reads a file and sends it over UDP using Go-Back-N reliability[cite: 1, 2]."""
     udp_socket.settimeout(timeout) 
     
-    packets_data = []
     with open(filename, "rb") as f:
-        while True:
-            chunk = f.read(MAX_PAYLOAD)
-            if not chunk:
-                break
-            packets_data.append(chunk)
+        file_data = f.read()
+        
+    if transfer_type == "A":
+        # ASCII: convert local newlines to \r\n
+        file_data = file_data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+        
+    if transfer_mode == "C":
+        # Compressed: use zlib to compress the entire payload
+        file_data = zlib.compress(file_data)
+        
+    packets_data = []
+    for i in range(0, max(1, len(file_data)), MAX_PAYLOAD):
+        chunk = file_data[i:i+MAX_PAYLOAD]
+        if not chunk: # Empty file case
+            chunk = b""
+        packets_data.append(chunk)
             
     total_packets = len(packets_data)
     base = 0
@@ -109,14 +119,15 @@ def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0):
 
     print("[!] Transfer finished, but server did not acknowledge FIN.")
 
-def gbn_receive_file(filepath, udp_socket):
+def gbn_receive_file(filepath, udp_socket, transfer_type="I", transfer_mode="S"):
     """Receives a file over UDP using Go-Back-N strict ordering."""
+    import os
     udp_socket.settimeout(None) 
     expected_seq_num = 0
+    received_data = bytearray()
     
-    with open(filepath, "wb") as f:
-        while True:
-            packet, addr = udp_socket.recvfrom(4096)
+    while True:
+        packet, addr = udp_socket.recvfrom(4096)
             parsed_header, is_valid = parse_packet(packet)
             
             if not is_valid or not parsed_header:
@@ -130,7 +141,7 @@ def gbn_receive_file(filepath, udp_socket):
                 break
                 
             if flags == FLAG_DATA and seq_num == expected_seq_num:
-                f.write(data)
+                received_data.extend(data)
                 # Send Cumulative ACK[cite: 2]
                 ack_pkt = make_packet(0, expected_seq_num, FLAG_ACK)
                 udp_socket.sendto(ack_pkt, addr)
@@ -141,3 +152,17 @@ def gbn_receive_file(filepath, udp_socket):
                 last_good_ack = max(0, expected_seq_num - 1)
                 ack_pkt = make_packet(0, last_good_ack, FLAG_ACK)
                 udp_socket.sendto(ack_pkt, addr)
+
+    # Post-process the received data before writing to disk
+    final_data = bytes(received_data)
+    if transfer_mode == "C":
+        try:
+            final_data = zlib.decompress(final_data)
+        except zlib.error:
+            print("[!] Warning: Failed to decompress received data.")
+            
+    if transfer_type == "A":
+        final_data = final_data.replace(b'\r\n', os.linesep.encode())
+        
+    with open(filepath, "wb") as f:
+        f.write(final_data)
