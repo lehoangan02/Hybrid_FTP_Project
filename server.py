@@ -225,10 +225,13 @@ def handle_client(client_conn, client_addr):
                 
                 parts = command.split(" ", 1)
                 prefix = "uploaded_"
+                ext = ""
                 if len(parts) > 1:
-                    prefix += parts[1] + "_"
+                    filename = parts[1]
+                    name_part, ext = os.path.splitext(filename)
+                    prefix += name_part + "_"
                 
-                unique_name = prefix + uuid.uuid4().hex[:8]
+                unique_name = prefix + uuid.uuid4().hex[:8] + ext
                 filepath = get_safe_path(base_dir, current_dir, unique_name)
                 
                 if not filepath:
