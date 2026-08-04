@@ -162,7 +162,7 @@ def handle_client(client_conn, client_addr):
                     client_conn.sendall(b"550 File not found.\r\n")
                     continue
                     
-                if not is_pasv and not client_data_addr:
+                if not data_socket and not client_data_addr:
                     client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
                     continue
                 
@@ -174,6 +174,7 @@ def handle_client(client_conn, client_addr):
                     rdt.gbn_send_file(filepath, data_socket, client_udp_addr, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     data_socket.close()
                     data_socket = None
+                    is_pasv = False
                 else:
                     # Active Mode RETR: Server creates socket, knocks, and sends directly
                     active_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -183,6 +184,7 @@ def handle_client(client_conn, client_addr):
                     print(f"[*] Active Mode: Sending {filename} to client...")
                     rdt.gbn_send_file(filepath, active_socket, client_data_addr, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     active_socket.close()
+                    client_data_addr = None
                 
                 client_conn.sendall(b"226 Transfer complete.\r\n")
             
@@ -198,7 +200,7 @@ def handle_client(client_conn, client_addr):
                     client_conn.sendall(b"550 Access denied.\r\n")
                     continue
                 
-                if not is_pasv and not client_data_addr:
+                if not data_socket and not client_data_addr:
                     client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
                     continue
                 
@@ -209,6 +211,7 @@ def handle_client(client_conn, client_addr):
                     rdt.gbn_receive_file(filepath, data_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     data_socket.close()
                     data_socket = None
+                    is_pasv = False
                 else:
                     # Active Mode STOR: Server binds a port and knocks the client to tell it where to send
                     active_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -217,11 +220,12 @@ def handle_client(client_conn, client_addr):
                     
                     rdt.gbn_receive_file(filepath, active_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     active_socket.close()
+                    client_data_addr = None
                 
                 client_conn.sendall(b"226 Transfer complete.\r\n")
 
             elif command.upper().startswith("STOU"):
-                if not is_pasv and not client_data_addr:
+                if not data_socket and not client_data_addr:
                     client_conn.sendall(b"425 Use PASV or PORT first.\r\n")
                     continue
                 
@@ -247,12 +251,14 @@ def handle_client(client_conn, client_addr):
                     rdt.gbn_receive_file(filepath, data_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     data_socket.close()
                     data_socket = None
+                    is_pasv = False
                 else:
                     active_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     active_socket.bind((HOST, 0))
                     active_socket.sendto(b"KNOCK", client_data_addr)
                     rdt.gbn_receive_file(filepath, active_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
                     active_socket.close()
+                    client_data_addr = None
                 
                 client_conn.sendall(b"226 Transfer complete.\r\n")
                 
@@ -338,6 +344,7 @@ def handle_client(client_conn, client_addr):
                 if data_socket:
                     data_socket.close()
                     data_socket = None
+                    is_pasv = False
                 is_pasv = False
                 client_data_addr = None
                 client_conn.sendall(b"226 Abort successful.\r\n")

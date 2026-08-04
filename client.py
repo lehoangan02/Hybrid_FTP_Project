@@ -61,15 +61,20 @@ while True:
             if len(parts) > 1 and parts[1].upper() in ["S", "B", "C"]:
                 transfer_mode = parts[1].upper()
                 
+        # --- NEW LOCAL VALIDATION ---
+        is_data_cmd = (user_input.upper().startswith("LIST") or 
+                       user_input.upper().startswith("NLST") or 
+                       user_input.upper().startswith("RETR") or 
+                       user_input.upper().startswith("STOR") or 
+                       user_input.upper().startswith("STOU"))
+        if is_data_cmd and not data_server_port and not is_active_mode:
+            print(f"Error: You must send PASV or PORT before {user_input.upper().split(' ')[0]}.")
+            continue
+                
         # Send any other command normally
         client_socket.sendall((user_input + "\r\n").encode('utf-8'))
     
     if user_input.upper().startswith("LIST") or user_input.upper().startswith("NLST"):
-        if not data_server_port and not is_active_mode:
-            print(f"Error: You must send PASV or PORT before {user_input.upper().split(' ')[0]}.")
-            print(client_socket.recv(1024).decode('utf-8').strip())
-            continue
-            
         print(client_socket.recv(1024).decode('utf-8').strip())
         
         if is_active_mode:
@@ -91,11 +96,6 @@ while True:
         continue
 
     elif user_input.upper().startswith("RETR"):
-        if not data_server_port and not is_active_mode:
-            print("Error: You must send PASV or PORT before RETR.")
-            print(client_socket.recv(1024).decode('utf-8').strip())
-            continue
-            
         reply = client_socket.recv(1024).decode('utf-8').strip()
         print(reply)
         
@@ -152,11 +152,6 @@ while True:
         continue
 
     elif user_input.upper().startswith("STOR") or user_input.upper().startswith("STOU"):
-        if not data_server_port and not is_active_mode:
-            print(f"Error: You must send PASV or PORT before {user_input.upper().split(' ')[0]}.")
-            print(client_socket.recv(1024).decode('utf-8').strip())
-            continue
-            
         reply = client_socket.recv(1024).decode('utf-8').strip()
         print(reply)
         
