@@ -2,7 +2,7 @@ import socket
 import rdt
 import hashlib
 
-HOST = '192.168.1.7'
+HOST = '10.165.59.209'
 PORT = 2121
 
 data_server_ip = None
