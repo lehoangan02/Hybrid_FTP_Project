@@ -108,46 +108,58 @@ while True:
         if is_active_mode:
             # Active Mode: Wait for the server to knock so we know its address!
             _, server_active_addr = client_active_udp.recvfrom(1024)
-            rdt.gbn_receive_file("downloaded_" + filename, client_active_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
-        else:
-            # Passive Mode: Create socket, knock, and listen
-            pasv_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            pasv_udp.sendto(b"KNOCK", (data_server_ip, data_server_port))
-            rdt.gbn_receive_file("downloaded_" + filename, pasv_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
-            pasv_udp.close()
-            data_server_port = None
-                
-        print(f"[*] Successfully saved as downloaded_{filename}\n")
-
-        transfer_complete_msg = client_socket.recv(1024).decode('utf-8').strip()
-        print(transfer_complete_msg)
-
-        print("[*] Requesting server hash for integrity check...")
-        client_socket.sendall((f"HASH {filename}\r\n").encode('utf-8'))
-        hash_reply = client_socket.recv(1024).decode('utf-8').strip()
-        
-        if hash_reply.startswith("213"):
-            server_hash = hash_reply.split(" ")[1]
             
-            # Calculate local hash of the downloaded file
-            hasher = hashlib.sha256()
-            with open("downloaded_" + filename, "rb") as f:
-                while True:
-                    chunk = f.read(4096)
-                    if not chunk:
-                        break
-                    hasher.update(chunk)
-            local_hash = hasher.hexdigest()
-            
-            print(f"Server SHA-256: {server_hash}")
-            print(f"Local  SHA-256: {local_hash}")
-            
-            if server_hash == local_hash:
-                print("[+] VERIFIED: File transferred perfectly without corruption!")
+        try:
+            if is_active_mode:
+                rdt.gbn_receive_file("downloaded_" + filename, client_active_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
             else:
-                print("[-] WARNING: File hashes do not match. Corruption detected!")
-        else:
-            print(f"[-] Could not verify hash: {hash_reply}")
+                # Passive Mode: Create socket, knock, and listen
+                pasv_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                pasv_udp.sendto(b"KNOCK", (data_server_ip, data_server_port))
+                rdt.gbn_receive_file("downloaded_" + filename, pasv_udp, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                pasv_udp.close()
+                data_server_port = None
+                    
+            print(f"[*] Successfully saved as downloaded_{filename}\n")
+
+            transfer_complete_msg = client_socket.recv(1024).decode('utf-8').strip()
+            print(transfer_complete_msg)
+
+            if transfer_complete_msg.startswith("226"):
+                print("[*] Requesting server hash for integrity check...")
+                client_socket.sendall((f"HASH {filename}\r\n").encode('utf-8'))
+                hash_reply = client_socket.recv(1024).decode('utf-8').strip()
+                
+                if hash_reply.startswith("213"):
+                    server_hash = hash_reply.split(" ")[1]
+                    
+                    import hashlib
+                    hasher = hashlib.sha256()
+                    with open("downloaded_" + filename, "rb") as f:
+                        while True:
+                            chunk = f.read(4096)
+                            if not chunk:
+                                break
+                            hasher.update(chunk)
+                    local_hash = hasher.hexdigest()
+                    
+                    print(f"Server SHA-256: {server_hash}")
+                    print(f"Local  SHA-256: {local_hash}")
+                    
+                    if server_hash == local_hash:
+                        print("[+] VERIFIED: File transferred perfectly without corruption!")
+                    else:
+                        print("[-] WARNING: File hashes do not match. Corruption detected!")
+                else:
+                    print(f"[-] Could not verify hash: {hash_reply}")
+        except KeyboardInterrupt:
+            print("\n[!] Abort requested (Ctrl+C). Sending ABOR to server...")
+            client_socket.sendall(b"ABOR\r\n")
+            abort_reply = client_socket.recv(1024).decode('utf-8').strip()
+            print(abort_reply)
+            if not is_active_mode and 'pasv_udp' in locals():
+                pasv_udp.close()
+                data_server_port = None
 
         continue
 
@@ -174,6 +186,7 @@ while True:
                 data_server_port = None
                 
             print(f"[*] Upload complete!\n")
+            print(client_socket.recv(1024).decode('utf-8').strip())
             
         except FileNotFoundError:
             print(f"Error: The file '{filename}' does not exist on your computer.")
@@ -185,8 +198,16 @@ while True:
                 pasv_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 pasv_udp.sendto(fin_pkt, (data_server_ip, data_server_port))
                 pasv_udp.close()
-            
-        print(client_socket.recv(1024).decode('utf-8').strip())
+            print(client_socket.recv(1024).decode('utf-8').strip())
+        except KeyboardInterrupt:
+            print("\n[!] Abort requested (Ctrl+C). Sending ABOR to server...")
+            client_socket.sendall(b"ABOR\r\n")
+            abort_reply = client_socket.recv(1024).decode('utf-8').strip()
+            print(abort_reply)
+            if not is_active_mode and 'pasv_udp' in locals():
+                pasv_udp.close()
+                data_server_port = None
+                
         continue
 
     # Normal TCP response handling

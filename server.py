@@ -5,6 +5,35 @@ import hashlib
 import threading
 import time
 import uuid
+import select
+
+def run_transfer_with_abort(client_conn, target_func, kwargs):
+    abort_event = threading.Event()
+    kwargs['abort_event'] = abort_event
+    
+    t = threading.Thread(target=target_func, kwargs=kwargs)
+    t.start()
+    
+    aborted = False
+    while t.is_alive():
+        r, _, _ = select.select([client_conn], [], [], 0.5)
+        if r:
+            data = client_conn.recv(1024)
+            if not data:
+                abort_event.set()
+                break
+            cmd = data.decode('utf-8').strip()
+            print(f"[*] Command received during transfer: {cmd}")
+            if cmd.upper() == "ABOR":
+                abort_event.set()
+                aborted = True
+                client_conn.sendall(b"226 Abort successful.\r\n")
+                break
+            else:
+                client_conn.sendall(b"500 Only ABOR is allowed during transfer.\r\n")
+                
+    t.join()
+    return aborted
 
 HOST = '127.0.0.1'
 PORT = 2121
@@ -171,7 +200,8 @@ def handle_client(client_conn, client_addr):
                 if is_pasv:
                     print(f"[*] Waiting for client knock to send {filename}...")
                     _, client_udp_addr = data_socket.recvfrom(1024)
-                    rdt.gbn_send_file(filepath, data_socket, client_udp_addr, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filename': filepath, 'udp_socket': data_socket, 'dest_addr': client_udp_addr, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_send_file, kwargs)
                     data_socket.close()
                     data_socket = None
                     is_pasv = False
@@ -182,11 +212,13 @@ def handle_client(client_conn, client_addr):
                     active_socket.sendto(b"KNOCK", client_data_addr) # Send the knock!
                     
                     print(f"[*] Active Mode: Sending {filename} to client...")
-                    rdt.gbn_send_file(filepath, active_socket, client_data_addr, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filename': filepath, 'udp_socket': active_socket, 'dest_addr': client_data_addr, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_send_file, kwargs)
                     active_socket.close()
                     client_data_addr = None
                 
-                client_conn.sendall(b"226 Transfer complete.\r\n")
+                if not aborted:
+                    client_conn.sendall(b"226 Transfer complete.\r\n")
             
             elif command.upper().startswith("STOR"):
                 parts = command.split(" ", 1)
@@ -208,7 +240,8 @@ def handle_client(client_conn, client_addr):
                 print(f"[*] Receiving {filename} from client...")
                 
                 if is_pasv:
-                    rdt.gbn_receive_file(filepath, data_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filepath': filepath, 'udp_socket': data_socket, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_receive_file, kwargs)
                     data_socket.close()
                     data_socket = None
                     is_pasv = False
@@ -218,11 +251,13 @@ def handle_client(client_conn, client_addr):
                     active_socket.bind((HOST, 0))
                     active_socket.sendto(b"KNOCK", client_data_addr)
                     
-                    rdt.gbn_receive_file(filepath, active_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filepath': filepath, 'udp_socket': active_socket, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_receive_file, kwargs)
                     active_socket.close()
                     client_data_addr = None
                 
-                client_conn.sendall(b"226 Transfer complete.\r\n")
+                if not aborted:
+                    client_conn.sendall(b"226 Transfer complete.\r\n")
 
             elif command.upper().startswith("STOU"):
                 if not data_socket and not client_data_addr:
@@ -248,7 +283,8 @@ def handle_client(client_conn, client_addr):
                 print(f"[*] Receiving unique file {unique_name} from client...")
                 
                 if is_pasv:
-                    rdt.gbn_receive_file(filepath, data_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filepath': filepath, 'udp_socket': data_socket, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_receive_file, kwargs)
                     data_socket.close()
                     data_socket = None
                     is_pasv = False
@@ -256,11 +292,13 @@ def handle_client(client_conn, client_addr):
                     active_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     active_socket.bind((HOST, 0))
                     active_socket.sendto(b"KNOCK", client_data_addr)
-                    rdt.gbn_receive_file(filepath, active_socket, transfer_type=transfer_type, transfer_mode=transfer_mode)
+                    kwargs = {'filepath': filepath, 'udp_socket': active_socket, 'transfer_type': transfer_type, 'transfer_mode': transfer_mode}
+                    aborted = run_transfer_with_abort(client_conn, rdt.gbn_receive_file, kwargs)
                     active_socket.close()
                     client_data_addr = None
                 
-                client_conn.sendall(b"226 Transfer complete.\r\n")
+                if not aborted:
+                    client_conn.sendall(b"226 Transfer complete.\r\n")
                 
             elif command.upper().startswith("MKD"):
                 parts = command.split(" ", 1)

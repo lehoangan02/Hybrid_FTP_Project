@@ -40,7 +40,7 @@ def parse_packet(packet):
     is_valid = (pkt_checksum == calculated_checksum)
     return (seq_num, ack_num, length, flags, data), is_valid
 
-def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0, transfer_type="I", transfer_mode="S"):
+def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0, transfer_type="I", transfer_mode="S", abort_event=None):
     """Reads a file and sends it over UDP using Go-Back-N reliability[cite: 1, 2]."""
     udp_socket.settimeout(timeout) 
     
@@ -69,6 +69,10 @@ def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0, t
     print(f"[*] Starting GBN transfer of {total_packets} packets...")
     
     while base < total_packets:
+        if abort_event and abort_event.is_set():
+            print("[!] Transfer aborted by abort_event.")
+            return False
+            
         # Send packets up to the window size limit
         while next_seq_num < base + window_size and next_seq_num < total_packets:
             pkt = make_packet(next_seq_num, 0, FLAG_DATA, packets_data[next_seq_num])
@@ -119,15 +123,23 @@ def gbn_send_file(filename, udp_socket, dest_addr, window_size=5, timeout=1.0, t
 
     print("[!] Transfer finished, but server did not acknowledge FIN.")
 
-def gbn_receive_file(filepath, udp_socket, transfer_type="I", transfer_mode="S"):
+def gbn_receive_file(filepath, udp_socket, transfer_type="I", transfer_mode="S", abort_event=None):
     """Receives a file over UDP using Go-Back-N strict ordering."""
     import os
-    udp_socket.settimeout(None) 
+    udp_socket.settimeout(0.5) 
     expected_seq_num = 0
     received_data = bytearray()
     
     while True:
-        packet, addr = udp_socket.recvfrom(4096)
+        if abort_event and abort_event.is_set():
+            print("[!] Receive aborted by abort_event.")
+            return False
+            
+        try:
+            packet, addr = udp_socket.recvfrom(4096)
+        except socket.timeout:
+            continue
+            
         parsed_header, is_valid = parse_packet(packet)
         
         if not is_valid or not parsed_header:
